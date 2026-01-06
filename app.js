@@ -227,12 +227,6 @@ function setNav(nav){
     b.classList.toggle("active", b.dataset.nav===nav);
   });
   
-  // PWA: service worker register
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").catch(()=>{});
-  });
-}
   renderTabs();
   renderStories();
   renderView();
@@ -1716,6 +1710,12 @@ function openStoryViewer(storyId){
   window.addEventListener("beforeunload", cleanup);
   render();
   startTimer();
+}
+  
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(()=>{});
+  });
 }
 
 /** ===============================
