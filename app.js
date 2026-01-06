@@ -1536,18 +1536,92 @@ function openEditor(){
  *  =============================== */
 let storyTimer = null;
 
+let storyTimer = null;
+
 function openStoryViewer(storyId){
   const idx0 = state.stories.findIndex(s=>s.id===storyId);
   if(idx0 < 0) return;
 
   let idx = idx0;
   let progress = 0; // 0..100
-  const DURATION_MS = 4500; // время на одну сторис
+  const DURATION_MS = 4500;
   const TICK_MS = 45;
 
-    // handlers refs (для cleanup)
+  // refs for cleanup
   let touchStart = null, touchMove = null, touchEnd = null;
   let onDown = null, onUp = null;
+
+  function stop(){
+    if(storyTimer) clearInterval(storyTimer);
+    storyTimer = null;
+  }
+
+  function startTimer(){
+    stop();
+    progress = 0;
+    storyTimer = setInterval(()=>{
+      progress += (100 / (DURATION_MS / TICK_MS));
+      if(progress >= 100){
+        next();
+      }else{
+        render(); // MVP: rerender
+      }
+    }, TICK_MS);
+  }
+
+  function next(){
+    stop();
+    if(idx < state.stories.length - 1){
+      idx++;
+      progress = 0;
+      render();
+      startTimer();
+    }else{
+      cleanup();
+      closeModal();
+    }
+  }
+
+  function prev(){
+    stop();
+    if(idx > 0){
+      idx--;
+      progress = 0;
+      render();
+      startTimer();
+    }else{
+      cleanup();
+      closeModal();
+    }
+  }
+
+  function cleanup(){
+    stop();
+    window.onkeydown = null;
+    overlay.removeEventListener("click", onOverlayClick);
+    document.removeEventListener("keydown", onEsc);
+    window.removeEventListener("beforeunload", cleanup);
+
+    if(touchStart) modalBody.removeEventListener("touchstart", touchStart);
+    if(touchMove) modalBody.removeEventListener("touchmove", touchMove);
+    if(touchEnd) modalBody.removeEventListener("touchend", touchEnd);
+
+    const mediaEl = modalBody.querySelector(".media");
+    if(mediaEl && onDown && onUp){
+      mediaEl.removeEventListener("pointerdown", onDown);
+      mediaEl.removeEventListener("pointerup", onUp);
+      mediaEl.removeEventListener("pointercancel", onUp);
+      mediaEl.removeEventListener("pointerleave", onUp);
+    }
+  }
+
+  function onOverlayClick(e){
+    if(e.target === overlay) cleanup();
+  }
+
+  function onEsc(e){
+    if(e.key === "Escape") cleanup();
+  }
 
   function render(){
     const s = state.stories[idx];
@@ -1558,7 +1632,6 @@ function openStoryViewer(storyId){
 
     openModal("Stories", `
       <div style="position:relative;">
-        <!-- progress -->
         <div style="display:flex; gap:6px; margin-bottom:10px;">
           ${state.stories.map((_,i)=>`
             <div style="flex:1; height:3px; border-radius:99px; background: rgba(255,255,255,.18); overflow:hidden;">
@@ -1573,7 +1646,6 @@ function openStoryViewer(storyId){
           `).join("")}
         </div>
 
-        <!-- media -->
         <div class="media" style="margin-bottom:10px">
           ${
             s.media.type==="img"
@@ -1593,160 +1665,43 @@ function openStoryViewer(storyId){
           </div>
         ` : ``}
 
-        <!-- tap zones (prev/next like insta) -->
         <div id="tapPrev" style="position:absolute; left:0; top:0; bottom:0; width:35%;"></div>
         <div id="tapNext" style="position:absolute; right:0; top:0; bottom:0; width:65%;"></div>
       </div>
     `);
 
-    // CTA logic
+    // CTA
     const ctaBtn = modalBody.querySelector("#storyCta");
     if(ctaBtn){
       ctaBtn.onclick = ()=>{
         const cta = s.cta || {};
+        cleanup();
         closeModal();
         if(cta.type==="product" && cta.targetId){
           openProduct(cta.targetId);
-        } else {
+        }else{
           setNav("catalog");
         }
       };
     }
 
-    // Prev/Next zones
-    modalBody.querySelector("#tapPrev").onclick = ()=>prev();
-    modalBody.querySelector("#tapNext").onclick = ()=>next();
+    // tap zones
+    modalBody.querySelector("#tapPrev").onclick = prev;
+    modalBody.querySelector("#tapNext").onclick = next;
 
-        // Pause on hold (like Instagram): держим палец/мышь — пауза
+    // Pause on hold
     const mediaEl = modalBody.querySelector(".media");
     let isHolding = false;
 
-    function pause(){
-      if(!storyTimer) return;
-      stop();
-    }
+    function pause(){ stop(); }
     function resume(){
       if(isHolding) return;
-      // продолжить только если модалка открыта
       if(!overlay.classList.contains("show")) return;
       startTimer();
     }
 
-     onDown = (e)=>{ isHolding = true; pause(); };
-     onUp = (e)=>{ isHolding = false; resume(); };
+    onDown =
 
-    // pointer events (и для тача, и для мыши)
-    mediaEl.addEventListener("pointerdown", onDown);
-    mediaEl.addEventListener("pointerup", onUp);
-    mediaEl.addEventListener("pointercancel", onUp);
-    mediaEl.addEventListener("pointerleave", onUp);
-
-        // Swipe left/right for next/prev
-    let sx = 0, sy = 0, moved = false;
-
-     touchStart = (e)=>{
-      const p = e.touches ? e.touches[0] : e;
-      sx = p.clientX; sy = p.clientY;
-      moved = false;
-    };
-     touchMove = (e)=>{
-      const p = e.touches ? e.touches[0] : e;
-      const dx = p.clientX - sx;
-      const dy = p.clientY - sy;
-      if(Math.abs(dx) > 18) moved = true;
-      // если горизонтальный свайп сильнее вертикального — блокируем скролл
-      if(Math.abs(dx) > Math.abs(dy)) e.preventDefault?.();
-    };
-     touchEnd = (e)=>{
-      if(!moved) return;
-      const p = e.changedTouches ? e.changedTouches[0] : e;
-      const dx = p.clientX - sx;
-      if(dx < -55) next();     // свайп влево = следующая
-      if(dx > 55) prev();      // свайп вправо = предыдущая
-    };
-
-    // вешаем на весь модалBody, чтобы свайп работал по всему экрану сторис
-    modalBody.addEventListener("touchstart", touchStart, {passive:true});
-    modalBody.addEventListener("touchmove", touchMove, {passive:false});
-    modalBody.addEventListener("touchend", touchEnd, {passive:true});
-
-    // keyboard support (desktop)
-    window.onkeydown = (e)=>{
-      if(!overlay.classList.contains("show")) return;
-      if(e.key==="ArrowLeft") prev();
-      if(e.key==="ArrowRight") next();
-      if(e.key==="Escape") { stop(); closeModal(); }
-    };
-  }
-
-  function stop(){
-    if(storyTimer) clearInterval(storyTimer);
-    storyTimer = null;
-  }
-
-  function startTimer(){
-    stop();
-    progress = 0;
-    storyTimer = setInterval(()=>{
-      progress += (100 / (DURATION_MS / TICK_MS));
-      if(progress >= 100){
-        next();
-      }else{
-        // обновляем только полоску прогресса без полного ререндера:
-        // проще в MVP — делаем лёгкий ререндер
-        render();
-      }
-    }, TICK_MS);
-  }
-
-  function next(){
-    stop();
-    if(idx < state.stories.length - 1){
-      idx++;
-      progress = 0;
-      render();
-      startTimer();
-    }else{
-      closeModal();
-    }
-  }
-
-  function prev(){
-    stop();
-    if(idx > 0){
-      idx--;
-      progress = 0;
-      render();
-      startTimer();
-    }else{
-      // если первая — закрываем
-      closeModal();
-    }
-  }
-
-  // безопасная очистка: при закрытии модалки или выходе со страницы — стопаем таймер
-  function cleanup(){
-    stop();
-    window.onkeydown = null;
-    overlay.removeEventListener("click", onOverlayClick);
-    document.removeEventListener("keydown", onEsc);
-    window.removeEventListener("beforeunload", cleanup);
-    
-        // снять свайп listeners, чтобы не копились
-    modalBody.removeEventListener("touchstart", touchStart);
-    modalBody.removeEventListener("touchmove", touchMove);
-    modalBody.removeEventListener("touchend", touchEnd);
-
-    // снять pause listeners
-    const mediaEl = modalBody.querySelector(".media");
-    if(mediaEl){
-      mediaEl.removeEventListener("pointerdown", onDown);
-      mediaEl.removeEventListener("pointerup", onUp);
-      mediaEl.removeEventListener("pointercancel", onUp);
-      mediaEl.removeEventListener("pointerleave", onUp);
-    }
-  }
-}
   function onOverlayClick(e){
     // overlay закрывает модалку в твоём коде, поэтому тут просто ловим факт клика
     if(e.target === overlay) cleanup();
